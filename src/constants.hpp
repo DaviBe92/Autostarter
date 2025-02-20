@@ -6,7 +6,7 @@
  */
 namespace Constants {
     // Version information
-    inline const std::string VERSION = "2.0";
+    inline const std::string VERSION = "2.1";
     inline const std::string AUTHOR = "Davi Be";
     inline const std::string VERSION_STRING = "Version " + VERSION + " by " + AUTHOR;
 
