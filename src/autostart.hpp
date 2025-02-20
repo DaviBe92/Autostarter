@@ -1,11 +1,9 @@
 #pragma once
+#include <iostream>
 #include <vector>
 #include <string>
 #include "config.hpp"
-
-// Forward declare Windows types
-using HANDLE = void*;
-
+#include <windows.h>
 /**
  * @brief Manages launch and termination of external processes.
  */
@@ -45,6 +43,13 @@ private:
      * @return true on success, false otherwise.
      */
     static bool QuitProcess(HANDLE process);
+
+    /**
+    * @brief Gets all child process IDs of a process.
+    * @param processId The ID of the process to inspect.
+    * @return A vector of child process IDs.
+    */
+    static std::vector<DWORD> GetChildProcessIds(DWORD processId);
 
     /**
      * @brief Check if a process with the given executable name is already running.

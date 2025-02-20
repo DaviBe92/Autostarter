@@ -175,24 +175,70 @@ bool AutoStarter::QuitPrograms()
 }
 
 /**
- * @brief Terminates a specific process handle.
+ * @brief Recursively terminates a process and its child processes.
  */
 bool AutoStarter::QuitProcess(HANDLE process)
 {
-	if (process == NULL || process == INVALID_HANDLE_VALUE)
-		return false;
+    if (process == NULL || process == INVALID_HANDLE_VALUE)
+        return false;
 
-	// First try to close gracefully
-	if (TerminateProcess(process, 0)) {
-		CloseHandle(process);
-		return true;
-	}
+    // Get the process ID of the process to terminate
+    DWORD processId = GetProcessId(process);
+    if (processId == 0) {
+        blog(LOG_WARNING, "Failed to get process ID (handle: %p), error code: %d", process, GetLastError());
+        CloseHandle(process);
+        return false;
+    }
 
-	blog(LOG_WARNING,
-	     "Failed to terminate process (handle: %p), error code: %d",
-	     process, GetLastError());
-	CloseHandle(process);
-	return false;
+    // Get all child processes of the process
+    std::vector<DWORD> childProcessIds = GetChildProcessIds(processId);
+
+    // Recursively terminate all child processes
+    for (DWORD childProcessId : childProcessIds) {
+        HANDLE childProcess = OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, childProcessId);
+        if (childProcess != NULL) {
+            QuitProcess(childProcess);
+        }
+    }
+
+    // First try to close gracefully
+    if (TerminateProcess(process, 0)) {
+        CloseHandle(process);
+		// Log the successful termination
+		blog(LOG_INFO, "Successfully terminated process (handle: %p)", process);
+        return true;
+    }
+
+    blog(LOG_WARNING, "Failed to terminate process (handle: %p), error code: %d", process, GetLastError());
+    CloseHandle(process);
+    return false;
+}
+
+/**
+ * @brief Gets all child process IDs of a process.
+ */
+std::vector<DWORD> AutoStarter::GetChildProcessIds(DWORD processId)
+{
+    std::vector<DWORD> childProcessIds;
+    ScopedHandle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
+    if (snapshot.get() == INVALID_HANDLE_VALUE) {
+        return childProcessIds;
+    }
+
+    PROCESSENTRY32W pe32;
+    pe32.dwSize = sizeof(pe32);
+
+    if (!Process32FirstW(snapshot.get(), &pe32)) {
+        return childProcessIds;
+    }
+
+    do {
+        if (pe32.th32ParentProcessID == processId) {
+            childProcessIds.push_back(pe32.th32ProcessID);
+        }
+    } while (Process32NextW(snapshot.get(), &pe32));
+
+    return childProcessIds;
 }
 
 /**
