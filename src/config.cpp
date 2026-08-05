@@ -60,6 +60,7 @@ QJsonObject PluginConfig::ToJson() const
 			programObj["executable"] =
 				QString::fromStdString(program.executable);
 			programObj["minimized"] = program.minimized;
+			programObj["isRelative"] = program.isRelative;
 			programsArray.append(programObj);
 		}
 		loadoutObj["programs"] = programsArray;
@@ -98,9 +99,10 @@ void PluginConfig::FromJson(const QJsonObject &json)
 			program.path =
 				programObj["path"].toString().toStdString();
 			program.executable = programObj["executable"]
-						     .toString()
-						     .toStdString();
+							 .toString()
+							 .toStdString();
 			program.minimized = programObj["minimized"].toBool(false);
+			program.isRelative = programObj["isRelative"].toBool(false);
 			loadout.programs.push_back(program);
 		}
 
@@ -175,4 +177,48 @@ void PluginConfig::InitDefaultLoadout()
 	Loadout loadout;
 	loadout.name = "Default";
 	loadouts.push_back(loadout);
+}
+
+std::string PluginConfig::ResolvePath(const std::string &path, bool isRelative)
+{
+	if (!isRelative) {
+		// Path is already absolute
+		return path;
+	}
+
+	// For relative paths, we need to find the OBS base directory
+	// OBS config path is typically: <OBS_ROOT>/config/obs-studio/plugin_config/autostarter/
+	// or for portable: <OBS_ROOT>/config/obs-studio/plugin_config/autostarter/
+	// We want to resolve to <OBS_ROOT>
+
+	char *config_dir = obs_module_config_path("");
+	if (!config_dir)
+		return path;
+
+	QString configPath = QString::fromUtf8(config_dir);
+	bfree(config_dir);
+
+	QDir dir(configPath);
+
+	// Navigate up from config/obs-studio/plugin_config/autostarter/ to find OBS root
+	// Try going up several levels to find a reasonable base directory
+	// Typically: autostarter -> plugin_config -> obs-studio -> config -> (OBS_ROOT)
+	for (int i = 0; i < 4 && !dir.isRoot(); i++) {
+		dir.cdUp();
+	}
+
+	QString obsBase = dir.absolutePath();
+
+	// Combine OBS base with relative path
+	QString relativePath = QString::fromStdString(path);
+	// Ensure path starts with separator for proper joining
+	if (!relativePath.startsWith("/") && !relativePath.startsWith("\\")) {
+		relativePath = "/" + relativePath;
+	}
+
+	QString resolvedPath = obsBase + relativePath;
+
+	// Normalize the path
+	QDir resolvedDir(resolvedPath);
+	return resolvedDir.absolutePath().toStdString();
 }

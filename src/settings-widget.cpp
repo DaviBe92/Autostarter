@@ -14,8 +14,8 @@
 #include <QLineEdit>
 
 ProgramListItem::ProgramListItem(const QString &path, bool minimized,
-				 QWidget *parent)
-	: QWidget(parent), fullPath(path)
+	bool isRelative, QWidget *parent)
+	: QWidget(parent), fullPath(path), relativeFlag(isRelative)
 {
 	// Create layout for the program item row
 	auto layout = new QHBoxLayout(this);
@@ -87,10 +87,21 @@ SettingsWidget::SettingsWidget(QWidget *parent) : QWidget(parent)
 
 	auto buttonLayout = new QHBoxLayout();
 	addProgramButton = new QPushButton("Add", this);
+	addRelativeProgramButton = new QPushButton("Add Relative Path", this);
 	deleteProgramButton = new QPushButton("Remove", this);
 	buttonLayout->addWidget(addProgramButton);
+	buttonLayout->addWidget(addRelativeProgramButton);
 	buttonLayout->addWidget(deleteProgramButton);
 	mainLayout->addLayout(buttonLayout);
+
+	// Relative path input layout
+	auto relativePathLayout = new QHBoxLayout();
+	auto relativePathLabel = new QLabel("Relative Path:", this);
+	relativePathInput = new QLineEdit(this);
+	relativePathInput->setPlaceholderText("e.g., /Folder/file.exe");
+	relativePathLayout->addWidget(relativePathLabel);
+	relativePathLayout->addWidget(relativePathInput);
+	mainLayout->addLayout(relativePathLayout);
 
     mainLayout->addSpacing(10);
 
@@ -132,6 +143,8 @@ SettingsWidget::SettingsWidget(QWidget *parent) : QWidget(parent)
 		&SettingsWidget::onClose);
 	connect(addProgramButton, &QPushButton::clicked, this,
 		&SettingsWidget::onAddProgram);
+	connect(addRelativeProgramButton, &QPushButton::clicked, this,
+		&SettingsWidget::onAddRelativePath);
 	connect(deleteProgramButton, &QPushButton::clicked, this,
 		&SettingsWidget::onDeleteProgram);
 	connect(launchButton, &QPushButton::clicked, this,
@@ -186,7 +199,7 @@ void SettingsWidget::onSave()
 	config.currentLoadout = loadoutCombo->currentText().toStdString();
 
 	if (Loadout *loadout = config.GetLoadout(
-		    loadoutCombo->currentText().toStdString())) {
+			loadoutCombo->currentText().toStdString())) {
 		for (int i = 0; i < programsList->count(); i++) {
 			auto item = programsList->item(i);
 			auto widget = qobject_cast<ProgramListItem *>(
@@ -195,13 +208,15 @@ void SettingsWidget::onSave()
 				QFileInfo fileInfo(widget->getPath());
 				for (auto &program : loadout->programs) {
 					if (program.path ==
-						    fileInfo.absolutePath()
-							    .toStdString() &&
-					    program.executable ==
-						    fileInfo.fileName()
-							    .toStdString()) {
+						fileInfo.absolutePath()
+							.toStdString() &&
+						program.executable ==
+						fileInfo.fileName()
+							.toStdString()) {
 						program.minimized =
 							widget->isMinimized();
+						program.isRelative =
+							widget->isRelativePath();
 						break;
 					}
 				}
@@ -221,51 +236,95 @@ void SettingsWidget::onClose()
 void SettingsWidget::onAddProgram()
 {
 	// Let user select a file, then create a new program entry in the current loadout
-    QString filename = QFileDialog::getOpenFileName(this, "Select Program", "", "All Files (*.*)");
-    if (filename.isEmpty()) {
-        return;
-    }
+	QString filename = QFileDialog::getOpenFileName(this, "Select Program", "", "All Files (*.*)");
+	if (filename.isEmpty()) {
+		return;
+	}
 
-    QFileInfo fileInfo(filename);
-    if (!fileInfo.exists() || !fileInfo.isReadable()) {
-        QMessageBox::warning(this, "Error", "Selected file does not exist or is not readable");
-        return;
-    }
+	QFileInfo fileInfo(filename);
+	if (!fileInfo.exists() || !fileInfo.isReadable()) {
+		QMessageBox::warning(this, "Error", "Selected file does not exist or is not readable");
+		return;
+	}
 
-    auto &config = PluginConfig::Get();
-    if (Loadout *loadout = config.GetLoadout(loadoutCombo->currentText().toStdString())) {
-        Program program;
-        program.path = fileInfo.absolutePath().toStdString();
-        program.executable = fileInfo.fileName().toStdString();
-        program.minimized = false;
-        loadout->programs.push_back(program);
+	auto &config = PluginConfig::Get();
+	if (Loadout *loadout = config.GetLoadout(loadoutCombo->currentText().toStdString())) {
+		Program program;
+		program.path = fileInfo.absolutePath().toStdString();
+		program.executable = fileInfo.fileName().toStdString();
+		program.minimized = false;
+		program.isRelative = false; // Default to absolute path
+		loadout->programs.push_back(program);
 
-        auto item = new QListWidgetItem(programsList);
-        auto widget = new ProgramListItem(filename, false, programsList);
-        item->setSizeHint(QSize(item->sizeHint().width(), 30)); // Set consistent height
-        programsList->setItemWidget(item, widget);
-    } else {
-        QMessageBox::warning(this, "Error", "No loadout selected");
-    }
+		auto item = new QListWidgetItem(programsList);
+		auto widget = new ProgramListItem(filename, false, false, programsList);
+		item->setSizeHint(QSize(item->sizeHint().width(), 30)); // Set consistent height
+		programsList->setItemWidget(item, widget);
+	} else {
+		QMessageBox::warning(this, "Error", "No loadout selected");
+	}
+}
+
+void SettingsWidget::onAddRelativePath()
+{
+	// Get relative path from input field
+	QString relativePath = relativePathInput->text().trimmed();
+	if (relativePath.isEmpty()) {
+		QMessageBox::warning(this, "Error", "Please enter a relative path");
+		return;
+	}
+
+	// Normalize path separators to forward slashes
+	relativePath = relativePath.replace("\\", "/");
+
+	auto &config = PluginConfig::Get();
+	if (Loadout *loadout = config.GetLoadout(loadoutCombo->currentText().toStdString())) {
+		Program program;
+		// For relative paths, store just the relative path in the path field
+		// Extract directory and executable from the relative path
+		int lastSlash = relativePath.lastIndexOf('/');
+		if (lastSlash > 0) {
+			program.path = relativePath.left(lastSlash).toStdString();
+			program.executable = relativePath.mid(lastSlash + 1).toStdString();
+		} else {
+			program.path = "";
+			program.executable = relativePath.toStdString();
+		}
+		program.minimized = false;
+		program.isRelative = true; // Mark as relative path
+		loadout->programs.push_back(program);
+
+		// Build display path for UI
+		QString displayPath = relativePath;
+		auto item = new QListWidgetItem(programsList);
+		auto widget = new ProgramListItem(displayPath, false, true, programsList);
+		item->setSizeHint(QSize(item->sizeHint().width(), 30)); // Set consistent height
+		programsList->setItemWidget(item, widget);
+
+		// Clear input field
+		relativePathInput->clear();
+	} else {
+		QMessageBox::warning(this, "Error", "No loadout selected");
+	}
 }
 
 void SettingsWidget::onDeleteProgram()
 {
 	// Remove the currently selected program from the list
-    auto item = programsList->currentItem();
-    if (!item) {
-        return;
-    }
+	auto item = programsList->currentItem();
+	if (!item) {
+		return;
+	}
 
-    auto widget = qobject_cast<ProgramListItem*>(programsList->itemWidget(item));
-    if (!widget) {
-        return;
-    }
+	auto widget = qobject_cast<ProgramListItem*>(programsList->itemWidget(item));
+	if (!widget) {
+		return;
+	}
 
-    QFileInfo fileInfo(widget->getPath());
-    auto &config = PluginConfig::Get();
-    if (Loadout *loadout = config.GetLoadout(loadoutCombo->currentText().toStdString())) {
-        auto &programs = loadout->programs;
+	QFileInfo fileInfo(widget->getPath());
+	auto &config = PluginConfig::Get();
+	if (Loadout *loadout = config.GetLoadout(loadoutCombo->currentText().toStdString())) {
+		auto &programs = loadout->programs;
         programs.erase(
             std::remove_if(
                 programs.begin(), programs.end(),
@@ -295,13 +354,13 @@ void SettingsWidget::UpdateProgramList()
 	programsList->clear();
 	auto &config = PluginConfig::Get();
 	if (Loadout *loadout = config.GetLoadout(
-		    loadoutCombo->currentText().toStdString())) {
+			loadoutCombo->currentText().toStdString())) {
 		for (const auto &program : loadout->programs) {
 			QString fullPath = QString::fromStdString(
 				program.path + "/" + program.executable);
 			auto item = new QListWidgetItem(programsList);
 			auto widget = new ProgramListItem(
-				fullPath, program.minimized, programsList);
+				fullPath, program.minimized, program.isRelative, programsList);
 			item->setSizeHint(QSize(item->sizeHint().width(),
 						30)); // Set consistent height
 			programsList->setItemWidget(item, widget);

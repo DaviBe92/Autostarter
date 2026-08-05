@@ -15,14 +15,17 @@ public:
 	 * @brief Constructs a single program item widget.
 	 * @param path Full path (directory + filename).
 	 * @param minimized Whether program should launch minimized.
+	 * @param isRelative Whether the path is relative.
 	 * @param parent Parent widget pointer.
 	 */
-	ProgramListItem(const QString &path, bool minimized, QWidget *parent = nullptr);
+	ProgramListItem(const QString &path, bool minimized, bool isRelative = false, QWidget *parent = nullptr);
 	QString getPath() const { return fullPath; }
 	bool isMinimized() const { return minimizedBox->isChecked(); }
+	bool isRelativePath() const { return relativeFlag; }
 
 private:
 	QString fullPath;
+	bool relativeFlag;
 	/**
 	 * @brief Label that displays the program's name or filename.
 	 */
@@ -60,6 +63,8 @@ private:
 	QListWidget *programsList;
 	QPushButton *addProgramButton;
 	QPushButton *deleteProgramButton;
+	QPushButton *addRelativeProgramButton;
+	QLineEdit *relativePathInput;
 	QCheckBox *askToLaunchCheckbox;
 	QCheckBox *autocloseCheckbox;
 	QPushButton *saveButton;
@@ -93,6 +98,10 @@ private slots:
 	 * @brief Add a new program to the currently selected loadout.
 	 */
 	void onAddProgram();
+	/**
+	 * @brief Add a new program with relative path to the currently selected loadout.
+	 */
+	void onAddRelativePath();
 	void onDeleteProgram();
 	void onLaunchApps();
 	void onQuitApps();

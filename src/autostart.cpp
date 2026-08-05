@@ -86,15 +86,18 @@ bool AutoStarter::IsProcessRunning(const std::string& executableName)
  */
 bool AutoStarter::LaunchProgram(const Program &program)
 {
-    // Check if program is already running
-    if (IsProcessRunning(program.executable)) {
-        blog(LOG_INFO, "Program '%s' is already running, skipping launch",
-             program.executable.c_str());
-        return true;
-    }
+	// Check if program is already running
+	if (IsProcessRunning(program.executable)) {
+		blog(LOG_INFO, "Program '%s' is already running, skipping launch",
+			 program.executable.c_str());
+		return true;
+	}
+
+	// Resolve the path (handles both absolute and relative paths)
+	std::string resolvedPath = PluginConfig::ResolvePath(program.path, program.isRelative);
 
 	QString fullPath =
-		QString::fromStdString(program.path + "/" + program.executable);
+		QString::fromStdString(resolvedPath + "/" + program.executable);
 
 	// Check if the program is a exe or a file to open
 	std::string extension;
@@ -107,26 +110,26 @@ bool AutoStarter::LaunchProgram(const Program &program)
 		// For non-exe files, use ShellExecute
 		HINSTANCE result = ShellExecuteA(NULL, "open",
 						 fullPath.toStdString().c_str(),
-						 NULL, program.path.c_str(),
+						 NULL, resolvedPath.c_str(),
 						 SW_SHOWNORMAL);
 		if ((intptr_t)result > 32) {
 			blog(LOG_INFO, "Successfully opened file: %s",
-			     program.executable.c_str());
+				 program.executable.c_str());
 			return true;
 		}
 		blog(LOG_WARNING, "Failed to open file '%s', error code: %d",
-		     program.executable.c_str(), (intptr_t)result);
+			 program.executable.c_str(), (intptr_t)result);
 		return false;
 	}
 
-    STARTUPINFO si = {sizeof(STARTUPINFO)};
+	STARTUPINFO si = {sizeof(STARTUPINFO)};
 
-    // check if the minimized flag is set
-    if (program.minimized) {
-        si.dwFlags = STARTF_USESHOWWINDOW;  // Minimize the window
-        si.wShowWindow = SW_SHOWMINIMIZED;  // Minimize the window
-    }
-    PROCESS_INFORMATION pi;
+	// check if the minimized flag is set
+	if (program.minimized) {
+		si.dwFlags = STARTF_USESHOWWINDOW;  // Minimize the window
+		si.wShowWindow = SW_SHOWMINIMIZED;  // Minimize the window
+	}
+	PROCESS_INFORMATION pi;
 
 	std::wstring commandLine = fullPath.toStdWString();
 
@@ -137,9 +140,9 @@ bool AutoStarter::LaunchProgram(const Program &program)
 			  FALSE, // Set handle inheritance to FALSE
 			  0,     // No creation flags
 			  NULL,  // Use parent's environment block
-			  (LPCWSTR)QString::fromStdString(program.path)
+			  (LPCWSTR)QString::fromStdString(resolvedPath)
 				  .toStdWString()
-				  .c_str(), // Use provided path
+				  .c_str(), // Use resolved path as working directory
 			  &si,              // Pointer to STARTUPINFO structure
 			  &pi) // Pointer to PROCESS_INFORMATION structure
 	) {
@@ -148,12 +151,12 @@ bool AutoStarter::LaunchProgram(const Program &program)
 		launchedProcesses.push_back(
 			pi.hProcess); // Store process handle
 		blog(LOG_INFO, "Successfully launched: %s (handle: %p)",
-		     program.executable.c_str(), pi.hProcess);
+			 program.executable.c_str(), pi.hProcess);
 		return true;
 	}
 
 	blog(LOG_WARNING, "Failed to launch process '%s', error code: %d",
-	     program.executable.c_str(), GetLastError());
+		 program.executable.c_str(), GetLastError());
 	return false;
 }
 

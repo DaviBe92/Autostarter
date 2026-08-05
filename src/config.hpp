@@ -12,6 +12,7 @@ struct Program {
     std::string path;        ///< Full path to the program directory
     std::string executable;  ///< Name of the executable file
     bool minimized = false;  ///< Whether to start the program minimized
+    bool isRelative = false; ///< Whether the path is relative to OBS installation
 };
 
 /**
@@ -76,6 +77,14 @@ public:
      * @brief Creates a default loadout configuration.
      */
     void InitDefaultLoadout();
+
+    /**
+     * @brief Resolves a path (either absolute or relative to OBS base directory).
+     * @param path The path to resolve (can be absolute or relative)
+     * @param isRelative Whether the path should be treated as relative to OBS
+     * @return The resolved absolute path
+     */
+    static std::string ResolvePath(const std::string &path, bool isRelative);
 
 private:
     PluginConfig() = default;
