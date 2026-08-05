@@ -4,6 +4,9 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 
 project(${_name} VERSION ${_version})
 
+# Specifica il toolset per Visual Studio
+set(CMAKE_GENERATOR_TOOLSET "v180" CACHE STRING "MSVC toolset" FORCE)
+
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" ON)
 option(ENABLE_QT "Use Qt functionality" ON)
 
