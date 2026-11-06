@@ -42,15 +42,18 @@ Plugin for OBS Studio that automatically launches and quits programs alongside O
 ## System Requirements
 
 - Windows 10 or later
-- OBS Studio 30.1.2 or later
+- OBS Studio 33.0 or later (use Autostarter 2.1 for older OBS versions)
 - 64-bit system
 
 ## Installation
 
 1. Download the latest release from the [releases page](https://github.com/DaviBe92/Autostarter/releases/latest)
 2. Close OBS Studio if it's running
-3. Copy the `autostarter.dll` to your OBS plugins directory:
-   `C:\Program Files\obs-studio\obs-plugins\64bit`
+3. Run the installer, or copy the `autostarter` folder from the zip into:
+   `C:\ProgramData\obs-studio\plugins\`
+   so the DLL ends up at `C:\ProgramData\obs-studio\plugins\autostarter\autostarter.dll`
+   (portable OBS: `<OBS folder>\plugins\autostarter\autostarter.dll`).
+   Delete any old `autostarter.dll` from `C:\Program Files\obs-studio\obs-plugins\64bit`.
 4. Start OBS Studio
 5. Find "Autostarter" in the Tools menu
 

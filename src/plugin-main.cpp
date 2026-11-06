@@ -35,6 +35,14 @@
 
 OBS_DECLARE_MODULE()
 
+// Close launched apps when the OBS UI exits. OBS 33 restricts obs_module_unload
+// to saving data and releasing references.
+static void on_frontend_event(enum obs_frontend_event event, void *)
+{
+	if (event == OBS_FRONTEND_EVENT_EXIT && PluginConfig::Get().autoclose)
+		AutoStarter::QuitPrograms();
+}
+
 /**
  * @brief Initializes the Autostarter plugin and handles loadout launching
  * 
@@ -70,6 +78,7 @@ bool obs_module_load(void)
 		nullptr);
 
 	PluginConfig::Get().Load();
+	obs_frontend_add_event_callback(on_frontend_event, nullptr);
 
 	// Check if loadout was specified via command line
 	if (!cmdLoadout.empty()) {
@@ -107,17 +116,10 @@ bool obs_module_load(void)
 }
 
 /**
- * @brief Handles plugin cleanup and process termination
- * 
- * Called when OBS is shutting down. If autoclose is enabled in the configuration,
- * this function will attempt to gracefully terminate all processes that were
- * launched by the plugin.
+ * @brief Unregisters the frontend callback. Process termination happens on
+ * OBS_FRONTEND_EVENT_EXIT (see on_frontend_event).
  */
 void obs_module_unload(void)
 {
-	// Check if auto close is enabled
-	if (PluginConfig::Get().autoclose) {
-		// Quit all launched processes
-		AutoStarter::QuitPrograms();
-	}
+	obs_frontend_remove_event_callback(on_frontend_event, nullptr);
 }

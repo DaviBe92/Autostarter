@@ -105,17 +105,18 @@ bool AutoStarter::LaunchProgram(const Program &program)
 
 	if (!extension.empty() && extension != ".exe") {
 		// For non-exe files, use ShellExecute
-		HINSTANCE result = ShellExecuteA(NULL, "open",
-						 fullPath.toStdString().c_str(),
-						 NULL, program.path.c_str(),
-						 SW_SHOWNORMAL);
+		// Wide API so non-ASCII paths work
+		HINSTANCE result = ShellExecuteW(
+			NULL, L"open", fullPath.toStdWString().c_str(), NULL,
+			QString::fromStdString(program.path).toStdWString().c_str(),
+			SW_SHOWNORMAL);
 		if ((intptr_t)result > 32) {
 			blog(LOG_INFO, "Successfully opened file: %s",
 			     program.executable.c_str());
 			return true;
 		}
 		blog(LOG_WARNING, "Failed to open file '%s', error code: %d",
-		     program.executable.c_str(), (intptr_t)result);
+		     program.executable.c_str(), (int)(intptr_t)result);
 		return false;
 	}
 
@@ -128,18 +129,19 @@ bool AutoStarter::LaunchProgram(const Program &program)
     }
     PROCESS_INFORMATION pi;
 
-	std::wstring commandLine = fullPath.toStdWString();
+	// Quote so paths with spaces resolve to the intended executable
+	std::wstring commandLine = L"\"" + fullPath.toStdWString() + L"\"";
+	std::wstring workingDir =
+		QString::fromStdString(program.path).toStdWString();
 
 	if (CreateProcess(NULL, // No module name (use command line)
-			  (LPWSTR)commandLine.c_str(), // Command line
+			  commandLine.data(), // Command line (must be writable)
 			  NULL,  // Process handle not inheritable
 			  NULL,  // Thread handle not inheritable
 			  FALSE, // Set handle inheritance to FALSE
 			  0,     // No creation flags
 			  NULL,  // Use parent's environment block
-			  (LPCWSTR)QString::fromStdString(program.path)
-				  .toStdWString()
-				  .c_str(), // Use provided path
+			  workingDir.c_str(), // Use provided path
 			  &si,              // Pointer to STARTUPINFO structure
 			  &pi) // Pointer to PROCESS_INFORMATION structure
 	) {

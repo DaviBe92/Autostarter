@@ -128,6 +128,7 @@ void PluginConfig::Load()
 	if (!file.open(QIODevice::ReadOnly)) {
 		// If the file does not exist, create a default loadout
 		InitDefaultLoadout();
+		return;
 	}
 
 	QByteArray data = file.readAll();

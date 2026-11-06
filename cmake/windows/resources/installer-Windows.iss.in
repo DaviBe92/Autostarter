@@ -14,7 +14,9 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={code:GetDirName}
+; OBS 33+ third-party plugin location (legacy Program Files path stops loading in OBS 34)
+DefaultDirName={commonappdata}\obs-studio\plugins
+DisableDirPage=yes
 DefaultGroupName={#MyAppName}
 OutputBaseFilename={#MyAppName}-{#MyAppVersion}-Windows-Installer
 Compression=lzma
@@ -28,6 +30,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Source: "..\release\Package\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; Flags: dontcopy
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
+
+[InstallDelete]
+; Remove legacy copies so OBS doesn't flag a duplicate "Legacy" plugin
+Type: files; Name: "{code:GetObsDir}\obs-plugins\64bit\{#MyAppName}.dll"
+Type: files; Name: "{code:GetObsDir}\obs-plugins\64bit\{#MyAppName}.pdb"
 
 [Icons]
 Name: "{group}\{cm:ProgramOnTheWeb,{#MyAppName}}"; Filename: "{#MyAppURL}"
@@ -50,13 +57,13 @@ end;
 
 // credit where it's due :
 // following function come from https://github.com/Xaymar/obs-studio_amf-encoder-plugin/blob/master/%23Resources/Installer.in.iss#L45
-function GetDirName(Value: string): string;
+function GetObsDir(Value: string): string;
 var
   InstallPath: string;
 begin
   // initialize default path, which will be returned when the following registry
   // key queries fail due to missing keys or for some different reason
-  Result := '{autopf}\obs-studio';
+  Result := ExpandConstant('{autopf}\obs-studio');
   // query the first registry value; if this succeeds, return the obtained value
   if RegQueryStringValue(HKLM32, 'SOFTWARE\OBS Studio', '', InstallPath) then
     Result := InstallPath
