@@ -72,6 +72,10 @@ function Package {
         Verbose = ($Env:CI -ne $null)
     }
     Compress-Archive -Force @CompressArgs
+
+    $ModernPackage = "${ProjectRoot}/release/OBS33/${Configuration}"
+    Invoke-External cmake --install "${ProjectRoot}/build_${Target}" --config $Configuration --component OBS33 --prefix $ModernPackage
+    Compress-Archive -Force -LiteralPath "${ModernPackage}/${ProductName}" -DestinationPath "${ProjectRoot}/release/${OutputName}-obs33.zip"
     Log-Group
 
     if ( ( $BuildInstaller ) ) {

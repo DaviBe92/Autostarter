@@ -31,93 +31,88 @@
 #include "settings-widget.hpp"
 #include "config.hpp"
 #include "autostart.hpp"
+#include <QElapsedTimer>
 #include <QMessageBox>
+#include <QTimer>
+#include <memory>
+#include <string_view>
 
 OBS_DECLARE_MODULE()
 
-/**
- * @brief Initializes the Autostarter plugin and handles loadout launching
- * 
- * This function:
- * 1. Checks for command line arguments (--autostarter <loadout>)
- * 2. Sets up the Tools menu integration
- * 3. Loads plugin configuration
- * 4. Launches applications based on:
- *    - Command line loadout (highest priority)
- *    - Auto-launch settings (if enabled)
- *    - User prompt (if askToLaunch is enabled)
- * 
- * @return true if initialization is successful
- */
-bool obs_module_load(void)
+namespace {
+std::unique_ptr<QObject> startupContext;
+std::string commandLineLoadout;
+bool frontendCallbackRegistered = false;
+
+void launchAtStartup()
 {
+	auto &config = PluginConfig::Get();
+	if (!commandLineLoadout.empty()) {
+		if (config.GetLoadout(commandLineLoadout)) {
+			AutoStarter::LaunchPrograms(commandLineLoadout);
+		} else {
+			auto *mainWindow = static_cast<QWidget *>(obs_frontend_get_main_window());
+			auto *message = new QMessageBox(QMessageBox::Warning, "Autostarter",
+				QString("Loadout '%1' was not found.").arg(QString::fromStdString(commandLineLoadout)),
+				QMessageBox::Ok, mainWindow);
+			message->setAttribute(Qt::WA_DeleteOnClose);
+			message->open();
+		}
+	} else if (config.enabled) {
+		if (config.askToLaunch)
+			launch_widget_create();
+		else
+			AutoStarter::LaunchPrograms();
+	}
+}
 
-	struct obs_cmdline_args cmdargs = obs_get_cmdline_args();
+void onFrontendEvent(obs_frontend_event event, void *)
+{
+	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+		QTimer::singleShot(0, startupContext.get(), launchAtStartup);
+	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
+		obs_frontend_remove_event_callback(onFrontendEvent, nullptr);
+		frontendCallbackRegistered = false;
+		startupContext.reset();
+		launch_widget_destroy();
+		delete settings_instance;
+		AutoStarter::QuitPrograms(true);
+	}
+}
+} // namespace
 
-	// Look for our custom argument | --autostarter <"loadout"> / This overrides the enabled and askToLaunch check
-	std::string cmdLoadout;
-	for (int i = 1; i < cmdargs.argc; i++) {
-		std::string arg = cmdargs.argv[i];
-		if (arg == "--autostarter" && i + 1 < cmdargs.argc) {
-			cmdLoadout = cmdargs.argv[i + 1];
+bool obs_module_load()
+{
+	QElapsedTimer timer;
+	timer.start();
+	const auto args = obs_get_cmdline_args();
+	for (int i = 1; i + 1 < args.argc; ++i) {
+		if (std::string_view(args.argv[i]) == "--autostarter") {
+			commandLineLoadout = args.argv[i + 1];
 			break;
 		}
 	}
 
-	// Add menu item to existing Tools menu
-	obs_frontend_add_tools_menu_item(
-		"Autostarter", [](void *) { SettingsWidget::ShowSettings(); },
-		nullptr);
-
 	PluginConfig::Get().Load();
+	obs_frontend_add_tools_menu_item(
+		"Autostarter", [](void *) { SettingsWidget::ShowSettings(); }, nullptr);
 
-	// Check if loadout was specified via command line
-	if (!cmdLoadout.empty()) {
-		// Check if the given loadout exists
-		if (!PluginConfig::Get().GetLoadout(cmdLoadout)) {
-			std::string errorString =
-				"Loadout '" + cmdLoadout + "' not found";
-			// Show an error modal
-			QMessageBox msgBox;
-			msgBox.setIcon(QMessageBox::Warning);
-			msgBox.setWindowTitle("Autostarter");
-			msgBox.setText(errorString.c_str());
-			msgBox.setStandardButtons(QMessageBox::Ok);
-			msgBox.setDefaultButton(QMessageBox::Ok);
-			msgBox.exec();
-
-		} else {
-			// Launch the applications provided by the given loadout
-			AutoStarter::LaunchPrograms(cmdLoadout.c_str());
-		}
-	} else {
-		// Check if the plugin is enabled
-		if (PluginConfig::Get().enabled) {
-			// Check if the plugin should ask to launch
-			if (PluginConfig::Get().askToLaunch) {
-				launch_widget_create();
-			} else {
-				// Launch the applications of the current loadout
-				AutoStarter::LaunchPrograms(
-					PluginConfig::Get().currentLoadout);
-			}
-		}
-	}
+	startupContext = std::make_unique<QObject>();
+	obs_frontend_add_event_callback(onFrontendEvent, nullptr);
+	frontendCallbackRegistered = true;
+	blog(LOG_INFO, "[Autostarter] Module initialized in %lld ms", static_cast<long long>(timer.elapsed()));
 	return true;
 }
 
-/**
- * @brief Handles plugin cleanup and process termination
- * 
- * Called when OBS is shutting down. If autoclose is enabled in the configuration,
- * this function will attempt to gracefully terminate all processes that were
- * launched by the plugin.
- */
-void obs_module_unload(void)
+void obs_module_unload()
 {
-	// Check if auto close is enabled
-	if (PluginConfig::Get().autoclose) {
-		// Quit all launched processes
-		AutoStarter::QuitPrograms();
+	if (frontendCallbackRegistered) {
+		obs_frontend_remove_event_callback(onFrontendEvent, nullptr);
+		frontendCallbackRegistered = false;
 	}
+	startupContext.reset();
+	launch_widget_destroy();
+	delete settings_instance;
+	AutoStarter::QuitPrograms(true);
+	commandLineLoadout.clear();
 }

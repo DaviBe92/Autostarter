@@ -37,6 +37,8 @@ function(set_target_properties_plugin target)
     DESTINATION obs-plugins/64bit
     OPTIONAL)
 
+  install(TARGETS ${target} LIBRARY DESTINATION ${target} COMPONENT OBS33 EXCLUDE_FROM_ALL)
+
   if(OBS_BUILD_DIR)
     add_custom_command(
       TARGET ${target}
