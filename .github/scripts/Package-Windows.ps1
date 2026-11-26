@@ -89,7 +89,8 @@ function Package {
         Log-Information 'Creating InnoSetup installer...'
         Push-Location -Stack BuildTemp
         Ensure-Location -Path "${ProjectRoot}/release"
-        Copy-Item -Path ${Configuration} -Destination Package -Recurse
+        # Installer ships the OBS 33 layout (plugins\autostarter\autostarter.dll)
+        Copy-Item -Path "OBS33/${Configuration}" -Destination Package -Recurse
         Invoke-External iscc ${IsccFile} /O"${ProjectRoot}/release" /F"${OutputName}-Installer"
         Remove-Item -Path Package -Recurse
         Pop-Location -Stack BuildTemp
