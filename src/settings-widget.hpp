@@ -9,6 +9,9 @@
 #include <QHBoxLayout>
 #include "config.hpp"
 
+#include <QToolButton>
+#include <QCloseEvent>
+
 class QSpinBox;
 
 class ProgramListItem : public QWidget {
@@ -25,10 +28,17 @@ public:
 	QCheckBox *autocloseBox;
 	QSpinBox *delayBox;
 	QPushButton *argumentsButton;
+	QToolButton *upButton;
+	QToolButton *downButton;
+	QToolButton *removeButton;
 
 private:
 	/**
-	 * @brief Label that displays the program's name or filename.
+	 * @brief Application icon shown at the left of the row.
+	 */
+	QLabel *iconLabel;
+	/**
+	 * @brief Label that displays the program's name.
 	 */
 	QLabel *pathLabel;
 };
@@ -59,7 +69,6 @@ private:
 	QComboBox *loadoutCombo;
 	QListWidget *programsList;
 	QPushButton *addProgramButton;
-	QPushButton *deleteProgramButton;
 	QCheckBox *askToLaunchCheckbox;
 	QCheckBox *autocloseCheckbox;
 	QPushButton *saveButton;
@@ -80,8 +89,22 @@ private:
 	 */
 	void UpdateProgramList();
 	void addProgram(const QString &filename);
-	void moveProgram(int offset);
+	void addShellApp(const QString &id);
+	void removeProgram(int row);
+	void moveProgram(int row, int offset);
 	void onAddStartMenuProgram();
+	/**
+	 * @brief Writes the draft to disk and applies it. Returns false if saving failed.
+	 */
+	bool saveSettings();
+	/**
+	 * @brief Describes everything the user can change, used to detect unsaved changes.
+	 */
+	QString snapshot() const;
+	QString savedSnapshot;
+
+protected:
+	void closeEvent(QCloseEvent *event) override;
 
 private slots:
 	/**
@@ -96,7 +119,6 @@ private slots:
 	 * @brief Add a new program to the currently selected loadout.
 	 */
 	void onAddProgram();
-	void onDeleteProgram();
 	void onLaunchApps();
 	void onQuitApps();
 	void onAddLoadoutClicked();

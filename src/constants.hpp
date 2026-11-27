@@ -14,8 +14,8 @@ namespace Constants {
     inline const std::string GITHUB_URL = "https://github.com/DaviBe92/Autostarter";
 
     // Window properties
-    inline const int DEFAULT_WINDOW_WIDTH = 400;
-    inline const int DEFAULT_WINDOW_HEIGHT = 550;
+    inline const int DEFAULT_WINDOW_WIDTH = 760;
+    inline const int DEFAULT_WINDOW_HEIGHT = 560;
 
     // UI text
     inline const std::string WINDOW_TITLE = "Autostarter Settings";

@@ -9,11 +9,14 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <tlhelp32.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <memory>
+#include <map>
+#include <set>
 
 namespace {
 struct CloseWindowsHandle {
@@ -32,6 +35,7 @@ struct LaunchedProgram {
 
 std::vector<LaunchedProgram> launchedPrograms;
 std::unique_ptr<QObject> launchContext;
+std::unique_ptr<QObject> minimizeContext;
 bool launchPending = false;
 
 std::wstring NativePath(const QString &path)
@@ -136,10 +140,173 @@ bool ReadExecutableShortcut(std::wstring &path, std::wstring &directory, std::ws
 	return true;
 }
 
+// Many apps ignore the "start minimized" request, so their windows are minimized after they appear.
+struct MinimizeWatch {
+	Handle process;
+	Handle job; // optional, covers child processes
+	DWORD processId = 0;
+	std::map<HWND, int> seen; // window -> tick when it was first seen
+	int ticks = 0;
+};
+
+struct ChildSearch {
+	DWORD processId;
+	bool found = false;
+};
+
+BOOL CALLBACK FindChildOfProcess(HWND child, LPARAM parameter)
+{
+	auto &search = *reinterpret_cast<ChildSearch *>(parameter);
+	DWORD childProcess = 0;
+	GetWindowThreadProcessId(child, &childProcess);
+	if (childProcess == search.processId) {
+		search.found = true;
+		return FALSE;
+	}
+	return TRUE;
+}
+
+BOOL CALLBACK MinimizeAppWindow(HWND window, LPARAM parameter)
+{
+	auto &watch = *reinterpret_cast<MinimizeWatch *>(parameter);
+	if (!IsWindowVisible(window) || GetWindow(window, GW_OWNER) ||
+	    (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW))
+		return TRUE;
+
+	DWORD windowProcess = 0;
+	GetWindowThreadProcessId(window, &windowProcess);
+	bool belongs = windowProcess == watch.processId;
+	if (!belongs) {
+		// Windows draws the frame of Store (UWP) apps in a host process, with the app's own window inside it.
+		wchar_t className[64]{};
+		if (GetClassNameW(window, className, static_cast<int>(std::size(className))) &&
+		    wcscmp(className, L"ApplicationFrameWindow") == 0) {
+			ChildSearch search{watch.processId};
+			EnumChildWindows(window, FindChildOfProcess, reinterpret_cast<LPARAM>(&search));
+			belongs = search.found;
+		}
+	}
+	if (!belongs && watch.job) {
+		Handle owner(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, windowProcess));
+		BOOL inJob = FALSE;
+		belongs = owner && IsProcessInJob(owner.get(), watch.job.get(), &inJob) && inJob;
+	}
+	if (!belongs)
+		return TRUE;
+
+	// Some apps restore their own window right after starting, so keep minimizing it for a few
+	// seconds. After that the window is left alone so the user can restore it.
+	const auto entry = watch.seen.try_emplace(window, watch.ticks);
+	if (IsIconic(window) || watch.ticks - entry.first->second > 15)
+		return TRUE;
+
+	ShowWindow(window, SW_SHOWMINNOACTIVE);
+	blog(LOG_INFO, "[Autostarter] Minimized a window of process %lu (tick %d)", watch.processId, watch.ticks);
+	return TRUE;
+}
+
+void MinimizeWhenShown(Handle process, Handle job, DWORD processId)
+{
+	if (!minimizeContext)
+		minimizeContext = std::make_unique<QObject>();
+
+	auto watch = std::make_shared<MinimizeWatch>();
+	watch->process = std::move(process);
+	watch->job = std::move(job);
+	watch->processId = processId;
+
+	auto *timer = new QTimer(minimizeContext.get());
+	QObject::connect(timer, &QTimer::timeout, timer, [watch, timer] {
+		EnumWindows(MinimizeAppWindow, reinterpret_cast<LPARAM>(watch.get()));
+		// Stop after 20 seconds, or once the app is gone.
+		const bool gone = watch->process && WaitForSingleObject(watch->process.get(), 0) == WAIT_OBJECT_0 &&
+				  (!watch->job || [&] {
+					  JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
+					  return QueryInformationJobObject(watch->job.get(),
+									   JobObjectBasicAccountingInformation, &info,
+									   sizeof(info), nullptr) &&
+						 info.ActiveProcesses == 0;
+				  }());
+		if (++watch->ticks >= 100 || gone) {
+			timer->stop();
+			timer->deleteLater();
+		}
+	});
+	timer->start(200);
+	blog(LOG_INFO, "[Autostarter] Watching process %lu to start it minimized", processId);
+}
+
+Handle DuplicateForWatch(HANDLE handle)
+{
+	HANDLE copy = nullptr;
+	if (handle && DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(), &copy, 0, FALSE,
+				      DUPLICATE_SAME_ACCESS))
+		return Handle(copy);
+	return Handle();
+}
+
 bool LaunchProgram(const Program &program, const std::vector<PROCESSENTRY32W> &entries)
 {
 	if (program.path.empty() || program.executable.empty())
 		return false;
+
+	// Microsoft Store apps are started through the shell by their Apps folder id.
+	if (program.path == "shell:AppsFolder") {
+		const auto appId = QString::fromStdString(program.executable).toStdWString();
+		ComApartment apartment;
+
+		// Activating the app through the activation manager returns its process id, which lets the
+		// plugin close the app on exit and find its window to minimize it.
+		using Microsoft::WRL::ComPtr;
+		ComPtr<IApplicationActivationManager> manager;
+		DWORD processId = 0;
+		HRESULT activated = CoCreateInstance(__uuidof(ApplicationActivationManager), nullptr,
+						     CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&manager));
+		if (SUCCEEDED(activated)) {
+			CoAllowSetForegroundWindow(manager.Get(), nullptr);
+			activated = manager->ActivateApplication(appId.c_str(), nullptr, AO_NOERRORUI, &processId);
+		}
+
+		if (FAILED(activated) || processId == 0) {
+			// Fall back to a plain shell launch, which can't be tracked.
+			const auto target = L"shell:AppsFolder\\" + appId;
+			const auto result = reinterpret_cast<INT_PTR>(
+				ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr,
+					      program.minimized ? SW_SHOWMINIMIZED : SW_SHOWNORMAL));
+			if (result > 32)
+				return true;
+			blog(LOG_WARNING, "[Autostarter] Could not start Store app '%s' (error 0x%08lX)",
+			     program.executable.c_str(), static_cast<unsigned long>(activated));
+			return false;
+		}
+
+		Handle process(OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+					   processId));
+		if (!process)
+			return true; // Started, but it can't be tracked.
+
+		// Activating a running app returns its existing process. Leave those alone, like other apps
+		// that were already open before OBS started.
+		FILETIME created{}, exited{}, kernel{}, user{}, now{};
+		GetSystemTimeAsFileTime(&now);
+		if (GetProcessTimes(process.get(), &created, &exited, &kernel, &user)) {
+			ULARGE_INTEGER start{}, current{};
+			start.LowPart = created.dwLowDateTime;
+			start.HighPart = created.dwHighDateTime;
+			current.LowPart = now.dwLowDateTime;
+			current.HighPart = now.dwHighDateTime;
+			if (current.QuadPart > start.QuadPart && current.QuadPart - start.QuadPart > 5ULL * 10000000ULL) {
+				blog(LOG_INFO, "[Autostarter] '%s' is already running", program.executable.c_str());
+				return true;
+			}
+		}
+
+		launchedPrograms.push_back({std::move(process), Handle(), program.executable, L"shell:AppsFolder\\" + appId,
+					    program.autoclose});
+		if (program.minimized)
+			MinimizeWhenShown(DuplicateForWatch(launchedPrograms.back().process.get()), Handle(), processId);
+		return true;
+	}
 
 	auto directory = NativePath(QString::fromStdString(program.path));
 	const auto fileName = QString::fromStdString(program.executable);
@@ -152,13 +319,22 @@ bool LaunchProgram(const Program &program, const std::vector<PROCESSENTRY32W> &e
 					ReadExecutableShortcut(path, directory, arguments);
 	if (!executable && !executableShortcut) {
 		ComApartment apartment;
-		const auto result = reinterpret_cast<INT_PTR>(
-			ShellExecuteW(nullptr, L"open", path.c_str(), arguments.empty() ? nullptr : arguments.c_str(),
-				      directory.c_str(), show));
-		if (result > 32)
+		SHELLEXECUTEINFOW execute{};
+		execute.cbSize = sizeof(execute);
+		execute.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+		execute.lpVerb = L"open";
+		execute.lpFile = path.c_str();
+		execute.lpParameters = arguments.empty() ? nullptr : arguments.c_str();
+		execute.lpDirectory = directory.c_str();
+		execute.nShow = show;
+		if (ShellExecuteExW(&execute)) {
+			Handle process(execute.hProcess);
+			if (program.minimized && process)
+				MinimizeWhenShown(std::move(process), Handle(), GetProcessId(execute.hProcess));
 			return true;
-		blog(LOG_WARNING, "[Autostarter] Could not open '%s' (shell error %ld)",
-		     program.executable.c_str(), static_cast<long>(result));
+		}
+		blog(LOG_WARNING, "[Autostarter] Could not open '%s' (error %lu)", program.executable.c_str(),
+		     GetLastError());
 		return false;
 	}
 
@@ -208,6 +384,10 @@ bool LaunchProgram(const Program &program, const std::vector<PROCESSENTRY32W> &e
 		launchedPrograms.pop_back();
 		return false;
 	}
+
+	if (program.minimized)
+		MinimizeWhenShown(DuplicateForWatch(launchedPrograms.back().process.get()),
+				  DuplicateForWatch(launchedPrograms.back().job.get()), info.dwProcessId);
 	return true;
 }
 
@@ -274,6 +454,7 @@ bool AutoStarter::LaunchPrograms(const Loadout &loadout)
 bool AutoStarter::QuitPrograms(bool automatic)
 {
 	launchContext.reset();
+	minimizeContext.reset();
 	launchPending = false;
 	bool success = true;
 	std::erase_if(launchedPrograms, [automatic, &success](const LaunchedProgram &program) {
