@@ -12,6 +12,9 @@ struct Program {
     std::string path;        ///< Full path to the program directory
     std::string executable;  ///< Name of the executable file
     bool minimized = false;  ///< Whether to start the program minimized
+    bool autoclose = true;   ///< Whether the program follows the global shutdown setting
+    int delaySeconds = 0;   ///< Delay before launching this program
+    std::string arguments;  ///< Optional Windows command-line arguments
 };
 
 /**
@@ -45,7 +48,7 @@ public:
     /**
      * @brief Saves current configuration to disk in JSON format.
      */
-    void Save();
+    bool Save();
 
     /**
      * @brief Loads configuration from disk, creates default if none exists.
@@ -78,6 +81,7 @@ public:
     void InitDefaultLoadout();
 
 private:
+    friend class SettingsWidget;
     PluginConfig() = default;
     QString GetConfigPath();
     QJsonObject ToJson() const;

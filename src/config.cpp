@@ -3,7 +3,9 @@
 #include <util/platform.h>
 #include <QDir>
 #include <QFile>
-#include <QStandardPaths>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <algorithm>
 
 /**
  * @brief Returns the singleton instance of PluginConfig
@@ -27,8 +29,7 @@ QString PluginConfig::GetConfigPath()
 	QString path = QString::fromUtf8(config_dir);
 	bfree(config_dir);
 
-	QDir().mkpath(path);
-	return path + "config.json";
+	return QDir(path).filePath("config.json");
 }
 
 /**
@@ -60,6 +61,9 @@ QJsonObject PluginConfig::ToJson() const
 			programObj["executable"] =
 				QString::fromStdString(program.executable);
 			programObj["minimized"] = program.minimized;
+			programObj["autoclose"] = program.autoclose;
+			programObj["delaySeconds"] = program.delaySeconds;
+			programObj["arguments"] = QString::fromStdString(program.arguments);
 			programsArray.append(programObj);
 		}
 		loadoutObj["programs"] = programsArray;
@@ -101,6 +105,9 @@ void PluginConfig::FromJson(const QJsonObject &json)
 						     .toString()
 						     .toStdString();
 			program.minimized = programObj["minimized"].toBool(false);
+			program.autoclose = programObj["autoclose"].toBool(true);
+			program.delaySeconds = std::clamp(programObj["delaySeconds"].toInt(), 0, 3600);
+			program.arguments = programObj["arguments"].toString().toStdString();
 			loadout.programs.push_back(program);
 		}
 
@@ -108,33 +115,36 @@ void PluginConfig::FromJson(const QJsonObject &json)
 	}
 }
 
-void PluginConfig::Save()
+bool PluginConfig::Save()
 {
 	QString configPath = GetConfigPath();
-	QFile file(configPath);
-	if (!file.open(QIODevice::WriteOnly)) {
-		return;
+	QSaveFile file(configPath);
+	const auto data = QJsonDocument(ToJson()).toJson(QJsonDocument::Indented);
+	if (configPath.isEmpty() || !QDir().mkpath(QFileInfo(configPath).absolutePath()) ||
+	    !file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
+		blog(LOG_WARNING, "[Autostarter] Could not save configuration");
+		return false;
 	}
-
-	QJsonObject json = ToJson();
-	QJsonDocument doc(json);
-	file.write(doc.toJson(QJsonDocument::Indented));
+	return true;
 }
 
 void PluginConfig::Load()
 {
 	QString configPath = GetConfigPath();
 	QFile file(configPath);
-	if (!file.open(QIODevice::ReadOnly)) {
-		// If the file does not exist, create a default loadout
+	if (!configPath.isEmpty() && file.exists()) {
+		const auto doc = file.open(QIODevice::ReadOnly)
+					 ? QJsonDocument::fromJson(file.readAll())
+					 : QJsonDocument();
+		if (doc.isObject())
+			FromJson(doc.object());
+		else
+			blog(LOG_WARNING, "[Autostarter] Could not read configuration");
+	}
+	if (loadouts.empty())
 		InitDefaultLoadout();
-	}
-
-	QByteArray data = file.readAll();
-	QJsonDocument doc = QJsonDocument::fromJson(data);
-	if (doc.isObject()) {
-		FromJson(doc.object());
-	}
+	if (!GetLoadout(currentLoadout))
+		currentLoadout = loadouts.front().name;
 }
 
 bool PluginConfig::AddLoadout(const std::string &name)

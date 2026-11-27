@@ -7,6 +7,12 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QHBoxLayout>
+#include "config.hpp"
+
+#include <QToolButton>
+#include <QCloseEvent>
+
+class QSpinBox;
 
 class ProgramListItem : public QWidget {
 	Q_OBJECT
@@ -14,23 +20,27 @@ public:
 	/**
 	 * @brief Constructs a single program item widget.
 	 * @param path Full path (directory + filename).
-	 * @param minimized Whether program should launch minimized.
+	 * @param program Launch and shutdown options.
 	 * @param parent Parent widget pointer.
 	 */
-	ProgramListItem(const QString &path, bool minimized, QWidget *parent = nullptr);
-	QString getPath() const { return fullPath; }
-	bool isMinimized() const { return minimizedBox->isChecked(); }
+	ProgramListItem(const QString &path, const Program &program, QWidget *parent = nullptr);
+	QCheckBox *minimizedBox;
+	QCheckBox *autocloseBox;
+	QSpinBox *delayBox;
+	QPushButton *argumentsButton;
+	QToolButton *upButton;
+	QToolButton *downButton;
+	QToolButton *removeButton;
 
 private:
-	QString fullPath;
 	/**
-	 * @brief Label that displays the program's name or filename.
+	 * @brief Application icon shown at the left of the row.
+	 */
+	QLabel *iconLabel;
+	/**
+	 * @brief Label that displays the program's name.
 	 */
 	QLabel *pathLabel;
-	/**
-	 * @brief Checkbox indicating if the program should be launched minimized.
-	 */
-	QCheckBox *minimizedBox;
 };
 
 /**
@@ -54,12 +64,11 @@ public:
 	static void ShowSettings();
 
 private:
-	QLabel *titleLabel;
+	PluginConfig draft;
 	QCheckBox *enableCheckbox;
 	QComboBox *loadoutCombo;
 	QListWidget *programsList;
 	QPushButton *addProgramButton;
-	QPushButton *deleteProgramButton;
 	QCheckBox *askToLaunchCheckbox;
 	QCheckBox *autocloseCheckbox;
 	QPushButton *saveButton;
@@ -79,6 +88,23 @@ private:
 	 * @brief Updates the program list according to the selected loadout.
 	 */
 	void UpdateProgramList();
+	void addProgram(const QString &filename);
+	void addShellApp(const QString &id);
+	void removeProgram(int row);
+	void moveProgram(int row, int offset);
+	void onAddStartMenuProgram();
+	/**
+	 * @brief Writes the draft to disk and applies it. Returns false if saving failed.
+	 */
+	bool saveSettings();
+	/**
+	 * @brief Describes everything the user can change, used to detect unsaved changes.
+	 */
+	QString snapshot() const;
+	QString savedSnapshot;
+
+protected:
+	void closeEvent(QCloseEvent *event) override;
 
 private slots:
 	/**
@@ -93,7 +119,6 @@ private slots:
 	 * @brief Add a new program to the currently selected loadout.
 	 */
 	void onAddProgram();
-	void onDeleteProgram();
 	void onLaunchApps();
 	void onQuitApps();
 	void onAddLoadoutClicked();

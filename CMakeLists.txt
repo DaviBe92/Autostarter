@@ -12,6 +12,8 @@ include(defaults)
 include(helpers)
 
 add_library(${CMAKE_PROJECT_NAME} MODULE)
+target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_20)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE shell32 ole32 uuid)
 
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
@@ -22,7 +24,7 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 COMPONENTS Widgets Core)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Core)
   target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Widgets)
   target_compile_options(
     ${CMAKE_PROJECT_NAME} PRIVATE $<$<C_COMPILER_ID:Clang,AppleClang>:-Wno-quoted-include-in-framework-header
